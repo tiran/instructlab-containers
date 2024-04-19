@@ -1,0 +1,3 @@
+[submodule "instructlab"]
+	path = instructlab
+	url = https://github.com/instructlab/instructlab.git

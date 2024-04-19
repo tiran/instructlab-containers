@@ -1,0 +1,68 @@
+# CPU container comes with CPU-only builds of Torch and llama-cpp. The image
+# is considerable smaller than a CUDA or ROCm image.
+# ubi9/python-311 comes with virtual env, compilers, make, git, and more
+FROM registry.access.redhat.com/ubi9/python-311 as runtime
+ARG PYTHON=python3.11
+ENV PYTHON="${PYTHON}" \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    VIRTUAL_ENV="/opt/app-root"
+ENV XDG_CACHE_HOME="${VIRTUAL_ENV}/.cache"
+ENV PIP_CACHE_DIR="${XDG_CACHE_HOME}/pip"
+RUN mkdir -p -m777 ${PIP_CACHE_DIR} ${XDG_CACHE_HOME}/huggingface
+COPY --chown=1001:0 containers/sitecustomize.py ${VIRTUAL_ENV}/lib/${PYTHON}/site-packages
+
+
+FROM runtime AS pytorch
+# build as root, so caching works
+USER 0
+# cache downloads in cache mount and don't byte compile Python files
+ENV PIP_NO_CACHE_DIR= \
+    PIP_NO_COMPILE=1
+COPY --chown=1001:0 requirements.txt ${VIRTUAL_ENV}/
+# pip constraint does not support optional dependencies.
+RUN sed 's/\[.*\]//' ${VIRTUAL_ENV}/requirements.txt > ${VIRTUAL_ENV}/constraints.txt
+RUN --mount=type=cache,sharing=locked,id=pipcache,target=${PIP_CACHE_DIR},mode=777,z \
+    umask 0000 && \
+    ${VIRTUAL_ENV}/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+
+FROM pytorch AS llama
+# remove cached wheel to force rebuild
+# Force AVX off, https://github.com/ggerganov/llama.cpp/issues/5316
+RUN --mount=type=cache,sharing=locked,id=pipcache,target=${PIP_CACHE_DIR},mode=777,z \
+    umask 0000 && \
+    pip cache remove llama_cpp_python && \
+    CFLAGS="-march=native -mtune=native -mno-avx" \
+    CXXFLAGS="-march=native -mtune=native -mno-avx" \
+    CMAKE_ARGS="-DLLAMA_AVX512=off -DLLAMA_AVX2=OFF -DLLAMA_FMA=OFF -DLLAMA_F16C=OFF" \
+        FORCE_CMAKE=1 \
+        ${VIRTUAL_ENV}/bin/pip install -c ${VIRTUAL_ENV}/constraints.txt llama-cpp-python
+
+
+# install from requirements.txt last. pip does not override installed
+# packages unless there is a version conflict.
+FROM llama AS pip-install
+RUN --mount=type=cache,sharing=locked,id=pipcache,target=${PIP_CACHE_DIR},mode=777,z \
+    umask 0000 && \
+    ${VIRTUAL_ENV}/bin/pip install wheel setuptools-scm && \
+    ${VIRTUAL_ENV}/bin/pip install -r ${VIRTUAL_ENV}/requirements.txt
+
+    # install instructlab last
+FROM pip-install AS instructlab
+COPY --chown=0:0 . /tmp/instructlab/
+RUN --mount=type=cache,sharing=locked,id=pipcache,target=${PIP_CACHE_DIR},mode=777,z \
+    umask 0000 && \
+    ${VIRTUAL_ENV}/bin/pip install --no-deps /tmp/instructlab
+RUN find ${VIRTUAL_ENV} -name __pycache__ | xargs rm -rf
+
+
+# create final image from base runtime, copy virtual env into final stage
+FROM runtime as final
+COPY --from=pip-install ${VIRTUAL_ENV}/lib/${PYTHON}/site-packages ${VIRTUAL_ENV}/lib/${PYTHON}/site-packages
+COPY --from=pip-install ${VIRTUAL_ENV}/bin ${VIRTUAL_ENV}/bin
+VOLUME ["/opt/app-root/.cache/huggingface"]
+CMD ["/bin/bash"]
+LABEL name="instructlab-cpu" \
+    com.github.instructlab.instructlab.target="cpu" \
+      summary="PyTorch, llama.cpp, and InstructLab dependencies for CPU" \
+      maintainer="Christian Heimes <cheimes@redhat.com>"
