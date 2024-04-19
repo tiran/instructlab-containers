@@ -13,19 +13,12 @@ rebuild:
 
 # set AMDGPU_ARCH default
 # set HSA override
-# Remove caching optimizations:
-#   remove cache mount (,z is not supported on Ubuntu)
-#   don't cache RPM packages
-#   don't cache pip pachages
+# SELinux context from cache mount (,z is not supported on Ubuntu)
 define mkcontainerfile =
 	sed -E \
 		-e 's|^(ARG AMDGPU_ARCH)=.*|\1=$(1)|g' \
 		-e 's|(ARG HSA_OVERRIDE_GFX_VERSION)=.*|\1=$(2)|g' \
-		-e 's|--mount=type=cache,.*,z||g' \
-		-e 's|--setopt=keepcache=True||g' \
-		-e 's|/tmp/remove-gfx\.sh|/tmp/remove-gfx.sh \&\& dnf clean all|g' \
-		-e 's|PIP_NO_CACHE_DIR=|PIP_NO_CACHE_DIR=off|g' \
-		-e '/pip cache remove/d' \
+		-e 's|(--mount=type=cache,.*),z|\1|g' \
 		$(3) > $(4)
 endef
 

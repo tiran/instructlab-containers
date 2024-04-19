@@ -33,36 +33,22 @@ jobs:
                       suffix: cpu
                       free_diskspace: false
         steps:
-            # container build needs lots of disk space. GHA has limited disk
-            # space. Cleanup unnecessary packages.
-            - run: df -h
-              if: ${{ matrix.free_diskspace }}
-
-            - name: Clean /opt and /usr/local
-              if: ${{ matrix.free_diskspace }}
-              run: |
-                  ls -la /opt
-                  sudo rm -rf /opt/hostedtoolcache
-                  ls -la /usr/local /usr/local/lib
-                  sudo rm -rf /usr/local
-                  df -h
-
-            - name: Clean Debian packages
-              if: ${{ matrix.free_diskspace }}
-              run: |
-                  sudo apt purge -y -f microsoft-edge-stable google-chrome-stable firefox azure-cli google-cloud-cli mono-complete
-                  sudo apt autoremove -y
-                  sudo apt autoclean -y
-                  # sudo dpkg-query -Wf '${Installed-Size}\t${Package}\n' | sort -nr | head -n20
-
-            - run: df -h
-              if: ${{ matrix.free_diskspace }}
-
             - name: Checkout
               uses: actions/checkout@v4
               with:
                   fetch-depth: 0
                   submodules: true
+
+            - name: Replace submodule .git reference for setuptools-scm
+              run: |
+                  set -ex
+                  # unset worktree first
+                  git -C instructlab config --unset core.worktree
+                  # replace file with git directory
+                  rm instructlab/.git
+                  cp -r .git/modules/instructlab instructlab/.git
+                  # verify
+                  git -C instructlab show
 
             - name: Login to Quay.io
               uses: docker/login-action@v3
@@ -82,25 +68,68 @@ jobs:
                   tags: |
                       type=raw,value=${{ matrix.suffix }}
 
-            - name: Build and export image ${{ matrix.suffix }}
+            # container build needs lots of disk space. GHA has limited disk
+            # space. Cleanup unnecessary packages.
+
+            - name: Clean /opt and /usr/local
+              if: ${{ matrix.free_diskspace }}
+              run: |
+                  df -h
+                  sudo rm -rf /opt/hostedtoolcache
+                  sudo rm -rf /opt/ghc
+                  sudo rm -rf /usr/local
+                  sudo rm -rf /usr/share/dotnet
+                  sudo rm -rf /usr/share/swift
+                  df -h
+
+            - name: Clean Docker images
+              if: ${{ matrix.free_diskspace }}
+              run: |
+                  docker system prune -a -f
+                  df -h
+
+            - name: Clean Debian packages
+              if: ${{ matrix.free_diskspace }}
+              run: |
+                  sudo apt purge -y -f microsoft-edge-stable google-chrome-stable firefox azure-cli google-cloud-cli mono-complete
+                  sudo apt autoremove -y
+                  sudo apt autoclean -y
+                  # sudo dpkg-query -Wf '${Installed-Size}\t${Package}\n' | sort -nr | head -n20
+                  df -h
+
+            - name: Build and export image ${{ steps.meta.outputs.tags }}
               uses: docker/build-push-action@v5
               with:
                   context: instructlab/
-                  file: ${{ matrix.containerfile }}
                   load: true
                   push: false
+                  file: ${{ matrix.containerfile }}
+                  tags: ${{ steps.meta.outputs.tags }}
+                  labels: ${{ steps.meta.outputs.labels }}
+                  # cache-from: type=gha
+                  # cache-to: type=gha
 
-            - name: Test image
+            - name: Test image ${{ steps.meta.outputs.tags }}
               run: |
+                  set -e
                   echo "::group::pip list"
-                  docker run --rm ${{ env.IMAGE_NAME }}:${{ matrix.suffix }} pip list
+                  docker run --rm ${{ steps.meta.outputs.tags }} pip list
                   echo "::endgroup::"
-                  docker run --rm ${{ env.IMAGE_NAME }}:${{ matrix.suffix }} ilab --version
-                  docker run --rm ${{ env.IMAGE_NAME }}:${{ matrix.suffix }} python3 -c 'import torch, llama_cpp'
 
-            - name: Push ${{ env.IMAGE_NAME }}:${{ matrix.suffix }}
+                  echo "::group::ilab version"
+                  docker run --rm ${{ steps.meta.outputs.tags }} ilab --version
+                  echo "::endgroup::"
+
+                  echo "::group::import torch, llama_cpp"
+                  docker run --rm ${{ steps.meta.outputs.tags }} python3 -c 'import torch, llama_cpp'
+                  echo "::endgroup::"
+
+            - name: Push image ${{ steps.meta.outputs.tags }}
+              if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch' }}
               uses: docker/build-push-action@v5
               with:
                   context: instructlab/
+                  push: true
                   file: ${{ matrix.containerfile }}
-                  push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+                  tags: ${{ steps.meta.outputs.tags }}
+                  labels: ${{ steps.meta.outputs.labels }}

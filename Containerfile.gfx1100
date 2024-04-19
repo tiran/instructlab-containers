@@ -19,10 +19,10 @@ ENV AMDGPU_ARCH="${AMDGPU_ARCH}" \
     CLANG_VER="17"
 # runtime dependencies (python-devel for torch_compile)
 COPY containers/rocm/remove-gfx.sh /tmp/
-RUN  \
-    dnf install -y --nodocs --setopt=install_weak_deps=False  \
+RUN --mount=type=cache,target=/var/cache/dnf \
+    dnf install -y --nodocs --setopt=install_weak_deps=False --setopt=keepcache=True \
     rocm-runtime hipblas hiprand hipsparse lld-libs ${PYTHON} ${PYTHON}-devel nvtop radeontop make git gh && \
-    /tmp/remove-gfx.sh && dnf clean all
+    /tmp/remove-gfx.sh
 # virtual env, umask 0000 to allow end-user to write to venv later
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     VIRTUAL_ENV="/opt/app-root" \
@@ -41,8 +41,8 @@ COPY --chown=0:0 containers/bin/debug-* ${VIRTUAL_ENV}/bin
 
 # build env contains compilers and build dependencies
 FROM runtime AS buildenv
-RUN  \
-    dnf install -y --nodocs  \
+RUN --mount=type=cache,sharing=locked,target=/var/cache/dnf \
+    dnf install -y --nodocs --setopt=keepcache=True \
     llvm llvm${CLANG_VER} clang${CLANG_VER} compiler-rt${CLANG_VER} \
     clang-tools-extra lld cmake ninja-build gcc \
     rocblas-devel hip-devel hipblas-devel rocprim-devel rocthrust-devel hipsparse-devel hipcub-devel hiprand-devel
@@ -50,19 +50,20 @@ RUN  \
 
 FROM buildenv AS pytorch
 # cache downloads in cache mount and don't byte compile Python files
-ENV PIP_NO_CACHE_DIR=off \
+ENV PIP_NO_CACHE_DIR= \
     PIP_NO_COMPILE=1
 COPY --chown=0:0 requirements.txt ${VIRTUAL_ENV}/
 # pip constraint does not support optional dependencies.
 RUN sed 's/\[.*\]//' ${VIRTUAL_ENV}/requirements.txt > ${VIRTUAL_ENV}/constraints.txt
-RUN  \
+RUN --mount=type=cache,sharing=locked,id=pipcache,target=${PIP_CACHE_DIR},mode=777 \
     umask 0000 && \
     ${VIRTUAL_ENV}/bin/pip install torch --index-url https://download.pytorch.org/whl/rocm${PYTORCH_ROCM_VERSION} && \
-    /tmp/remove-gfx.sh && dnf clean all
+    /tmp/remove-gfx.sh
 
 FROM pytorch AS llama
 # remove cached wheel to force rebuild
-RUN  \
+RUN --mount=type=cache,sharing=locked,id=pipcache,target=${PIP_CACHE_DIR},mode=777 \
+    pip cache remove llama_cpp_python && \
     umask 0000 && \
     CMAKE_ARGS="-DLLAMA_HIPBLAS=on -DCMAKE_C_COMPILER=/usr/bin/clang-${CLANG_VER} -DCMAKE_CXX_COMPILER=/usr/bin/clang++-${CLANG_VER} -DAMDGPU_TARGETS=${AMDGPU_ARCH}" \
     FORCE_CMAKE=1 \
@@ -87,7 +88,7 @@ RUN cd /tmp/bitsandbytes && \
 FROM llama AS pip-install
 # install from requirements.txt last. pip does not override installed
 # packages unless there is a version conflict.
-RUN  \
+RUN --mount=type=cache,sharing=locked,id=pipcache,target=${PIP_CACHE_DIR},mode=777 \
     umask 0000 && \
     ${VIRTUAL_ENV}/bin/pip install wheel setuptools-scm && \
     ${VIRTUAL_ENV}/bin/pip install -r ${VIRTUAL_ENV}/requirements.txt
@@ -96,7 +97,7 @@ RUN  \
 # install instructlab last
 FROM pip-install AS instructlab
 COPY --chown=0:0 . /tmp/instructlab
-RUN  \
+RUN --mount=type=cache,sharing=locked,id=pipcache,target=${PIP_CACHE_DIR},mode=777 \
     umask 0000 && \
     ${VIRTUAL_ENV}/bin/pip install --no-deps /tmp/instructlab
 RUN find ${VIRTUAL_ENV} -name __pycache__ | xargs rm -rf

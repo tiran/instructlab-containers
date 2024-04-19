@@ -47,7 +47,7 @@ RUN --mount=type=cache,sharing=locked,id=pipcache,target=${PIP_CACHE_DIR},mode=7
     ${VIRTUAL_ENV}/bin/pip install wheel setuptools-scm && \
     ${VIRTUAL_ENV}/bin/pip install -r ${VIRTUAL_ENV}/requirements.txt
 
-    # install instructlab last
+# install instructlab last
 FROM pip-install AS instructlab
 COPY --chown=0:0 . /tmp/instructlab/
 RUN --mount=type=cache,sharing=locked,id=pipcache,target=${PIP_CACHE_DIR},mode=777,z \
@@ -58,8 +58,8 @@ RUN find ${VIRTUAL_ENV} -name __pycache__ | xargs rm -rf
 
 # create final image from base runtime, copy virtual env into final stage
 FROM runtime as final
-COPY --from=pip-install ${VIRTUAL_ENV}/lib/${PYTHON}/site-packages ${VIRTUAL_ENV}/lib/${PYTHON}/site-packages
-COPY --from=pip-install ${VIRTUAL_ENV}/bin ${VIRTUAL_ENV}/bin
+COPY --from=instructlab ${VIRTUAL_ENV}/lib/${PYTHON}/site-packages ${VIRTUAL_ENV}/lib/${PYTHON}/site-packages
+COPY --from=instructlab ${VIRTUAL_ENV}/bin ${VIRTUAL_ENV}/bin
 VOLUME ["/opt/app-root/.cache/huggingface"]
 CMD ["/bin/bash"]
 LABEL name="instructlab-cpu" \
