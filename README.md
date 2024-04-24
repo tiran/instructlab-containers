@@ -6,26 +6,41 @@ The ROCm container file is designed for AMD GPUs with RDNA3 architecture (`gfx11
 
 The container comes with a Python virtual env that is already activated.
 
-## Quay.io images
+## Images
 
-Images are hosted on [Quay.io](https://quay.io/repository/tiran/instructlab-containers)
+Images are hosted on [ghcr.io](https://ghcr.io/tiran/instructlab-containers)
 
-```
+```shell
 toolbox create ...
 toolbox enter instructlab
 ```
 
 ### AMD ROCm GFX 1100 (Navi 3x / Radeon RX 7000 series)
-```
-toolbox create --image quay.io/tiran/instructlab-containers:rocm-gfx1100 instructlab
-```
-
-### AMD ROCm GFX 1100 (Navi 2x / Radeon RX 6000 series)
-```
-toolbox create --image quay.io/tiran/labrador-gpu:instructlab-containers instructlab
+```shell
+toolbox create --image ghcr.io/tiran/instructlab-containers:rocm-fc40-gfx1100 instructlab
 ```
 
-### CPU
+### AMD ROCm GFX 1030 (Navi 2x / Radeon RX 6000 series)
+```shell
+toolbox create --image ghcr.io/tiran/instructlab-containers:rocm-fc40-gfx1030 instructlab
 ```
-toolbox create --image quay.io/tiran/instructlab-containers:cpu instructlab
+
+### CPU (UBI 9)
+```shell
+podman pull ghcr.io/tiran/instructlab-containers:cpu
+```
+
+### NVIDIA CUDA 12.4 (UBI 9)
+```shell
+podman pull ghcr.io/tiran/instructlab-containers:cuda-ubi9
+```
+
+### AMD ROCm 6.0.2 (c9s)
+```shell
+podman pull ghcr.io/tiran/instructlab-containers:rocm-c9s
+```
+
+### Without toolbox
+```shell
+podman run -ti -v./src:/opt/app-root/src:z --device /dev/dri --device /dev/kfd ...
 ```
