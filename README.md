@@ -10,22 +10,27 @@ The container comes with a Python virtual env that is already activated.
 
 Images are hosted on [Quay.io](https://quay.io/repository/tiran/instructlab-containers)
 
-```
+```shell
 toolbox create ...
 toolbox enter instructlab
 ```
 
 ### AMD ROCm GFX 1100 (Navi 3x / Radeon RX 7000 series)
-```
+```shell
 toolbox create --image quay.io/tiran/instructlab-containers:rocm-gfx1100 instructlab
 ```
 
 ### AMD ROCm GFX 1100 (Navi 2x / Radeon RX 6000 series)
-```
+```shell
 toolbox create --image quay.io/tiran/labrador-gpu:instructlab-containers instructlab
 ```
 
 ### CPU
-```
+```shell
 toolbox create --image quay.io/tiran/instructlab-containers:cpu instructlab
+```
+
+### Without toolbox
+```shell
+podman run -ti -v./src:/opt/app-root/src:z --device /dev/dri --device /dev/kfd ...
 ```

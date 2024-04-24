@@ -1,7 +1,7 @@
 ROCM_CONTAINERFILE = instructlab/containers/rocm/Containerfile
 CPU_CONTAINERFILE = containers/cpu/Containerfile
 
-CONTAINERFILES = Containerfile.gfx1100 Containerfile.gfx1030 Containerfile.cpu
+CONTAINERFILES = Containerfile.gfx1100 Containerfile.gfx1030 Containerfile.rocm-ubi9 Containerfile.cpu
 
 .PHONY: all
 all: $(CONTAINERFILES)
@@ -30,3 +30,11 @@ Containerfile.gfx1030: $(ROCM_CONTAINERFILE) $(MAKEFILE_LIST)
 
 Containerfile.cpu: $(CPU_CONTAINERFILE) $(MAKEFILE_LIST)
 	$(call mkcontainerfile,,,$<,$@)
+
+.PHONY: hack-submodule
+hack-submodule:
+	if [ -f instructlab/.git ]; then mv instructlab/.git instructlab/.git.bak; fi
+	rm -rf instructlab/.git
+	cp -r .git/modules/instructlab instructlab/.git
+	sed -i '/worktree =/d' instructlab/.git/config
+	cp -a containers/rocm/*.repo instructlab/containers/rocm/

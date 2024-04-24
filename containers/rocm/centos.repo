@@ -1,0 +1,33 @@
+# ROCm depends on packages which are not available in UBI 9 repos:
+# runtime: perl-File-BaseDir
+# devel: libdrm-devel libpciaccess-devel valgrind-devel valgrind
+
+[centos-baseos]
+name=CentOS Stream $releasever - BaseOS
+metalink=https://mirrors.centos.org/metalink?repo=centos-baseos-9-stream&arch=$basearch&protocol=https,http
+gpgkey=https://www.centos.org/keys/RPM-GPG-KEY-CentOS-Official
+gpgcheck=1
+repo_gpgcheck=0
+metadata_expire=6h
+enabled=0
+priority=1000
+
+[centos-appstream]
+name=CentOS Stream $releasever - AppStream
+metalink=https://mirrors.centos.org/metalink?repo=centos-appstream-9-stream&arch=$basearch&protocol=https,http
+gpgkey=https://www.centos.org/keys/RPM-GPG-KEY-CentOS-Official
+gpgcheck=1
+repo_gpgcheck=0
+metadata_expire=6h
+enabled=0
+priority=1000
+
+[centos-crb]
+name=CentOS Stream $releasever - CRB
+metalink=https://mirrors.centos.org/metalink?repo=centos-crb-9-stream&arch=$basearch&protocol=https,http
+gpgkey=https://www.centos.org/keys/RPM-GPG-KEY-CentOS-Official
+gpgcheck=1
+repo_gpgcheck=0
+metadata_expire=6h
+enabled=0
+priority=1000
