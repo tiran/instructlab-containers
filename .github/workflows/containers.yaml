@@ -20,7 +20,7 @@ jobs:
         name: "${{ matrix.suffix }} container"
         runs-on: ubuntu-latest
         strategy:
-            fail-fast: false
+            fail-fast: true
             matrix:
                 include:
                     - containerfile: Containerfile.gfx1100
@@ -31,6 +31,9 @@ jobs:
                       free_diskspace: true
                     - containerfile: Containerfile.cuda
                       suffix: cuda-ubi9
+                      free_diskspace: true
+                    - containerfile: Containerfile.rocm-ubi9
+                      suffix: rocm-ubi9
                       free_diskspace: true
                     - containerfile: Containerfile.cpu
                       suffix: cpu
@@ -52,6 +55,12 @@ jobs:
                   cp -r .git/modules/instructlab instructlab/.git
                   # verify
                   git -C instructlab show
+
+            - name: Copy RHEL repo file for ROCm
+              if: ${{ matrix.suffix == 'rocm-ubi9' }}
+              run: |
+                  set -e
+                  cp rocm60.repo instructlab/containers/rocm/
 
             - name: Login to Quay.io
               uses: docker/login-action@v3

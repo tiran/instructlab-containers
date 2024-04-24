@@ -1,7 +1,7 @@
 ROCM_CONTAINERFILE = instructlab/containers/rocm/Containerfile
 CPU_CONTAINERFILE = containers/cpu/Containerfile
 
-CONTAINERFILES = Containerfile.gfx1100 Containerfile.gfx1030 Containerfile.cpu
+CONTAINERFILES = Containerfile.gfx1100 Containerfile.gfx1030 Containerfile.rocm-ubi9 Containerfile.cpu
 
 .PHONY: all
 all: $(CONTAINERFILES)
