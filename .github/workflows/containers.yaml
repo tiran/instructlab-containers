@@ -29,6 +29,9 @@ jobs:
                     - containerfile: Containerfile.gfx1030
                       suffix: rocm-gfx1030
                       free_diskspace: true
+                    - containerfile: Containerfile.cuda
+                      suffix: cuda-ubi9
+                      free_diskspace: true
                     - containerfile: Containerfile.cpu
                       suffix: cpu
                       free_diskspace: false
