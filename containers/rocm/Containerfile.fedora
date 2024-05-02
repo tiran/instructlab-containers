@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: Apache-2.0
+# Christian Heimes <cheimes@redhat.com>
+# Based on Zack Zlotnik's container file
+
+# runtime container has libraries, CLI tools, and virtual env
+ARG BASEIMAGE=registry.fedoraproject.org/fedora-toolbox:40
+FROM ${BASEIMAGE} AS runtime
+# args and env (default to gfx1100, GFX level 11.0.0, first GPU only)
+ARG HSA_OVERRIDE_GFX_VERSION=11.0.0
+ARG HIP_VISIBLE_DEVICES=0
+ARG AMDGPU_ARCH=gfx1100
+# PyTorch 2.2.1 does not support torch_compile with 3.12
+ARG PYTHON=python3.11
+ENV AMDGPU_ARCH="${AMDGPU_ARCH}" \
+    HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES}" \
+    HSA_OVERRIDE_GFX_VERSION="${HSA_OVERRIDE_GFX_VERSION}" \
+    PYTORCH_ROCM_VERSION="6.0" \
+    PYTHON="${PYTHON}" \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_COMPILE=1 \
+    PS1="(app-root) \w\$ " \
+    PKG_CACHE=${PKG_CACHE} \
+    VIRTUAL_ENV="/opt/app-root" \
+    PATH="/opt/rocm/bin:$PATH" \
+    CLANG_VER="17"
+
+# runtime dependencies (python-devel for torch_compile)
+COPY containers/rocm/remove-gfx.sh /tmp/
+RUN --mount=type=cache,sharing=locked,id=dnf-scl,target=/var/cache/dnf \
+    dnf install -y --nodocs --setopt=install_weak_deps=False --setopt=keepcache=True \
+        ${PYTHON} ${PYTHON}-devel lld-libs make git nvtop radeontop \
+        rocm-runtime hipblas hiprand hipsparse && \
+    /tmp/remove-gfx.sh && \
+    if [ "${PKG_CACHE}" == "off" ]; then dnf clean all; fi
+
+RUN umask 0000 && \
+    ${PYTHON} -m venv --upgrade-deps ${VIRTUAL_ENV} && \
+    find ${VIRTUAL_ENV} -name __pycache__ | xargs rm -rf
+ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
+# SELinux workaround for https://github.com/python/cpython/issues/83074
+COPY --chown=0:0 containers/sitecustomize.py ${VIRTUAL_ENV}/lib/${PYTHON}/site-packages
+# additional helpers to debug torch and llama
+COPY --chown=0:0 containers/bin/debug-* ${VIRTUAL_ENV}/bin
+
+
+# build env contains compilers and build dependencies
+FROM runtime AS builder
+RUN --mount=type=cache,sharing=locked,id=dnf-fedora,target=/var/cache/dnf \
+    dnf install -y --nodocs --setopt=keepcache=True \
+    llvm llvm${CLANG_VER} clang${CLANG_VER} compiler-rt${CLANG_VER} \
+    clang-tools-extra lld cmake ninja-build gcc \
+    rocblas-devel hip-devel hipblas-devel rocprim-devel rocthrust-devel hipsparse-devel hipcub-devel hiprand-devel && \
+    if [ "${PKG_CACHE}" == "off" ]; then dnf clean all; fi
+
+# cache downloads in cache mount and don't byte compile Python files
+ENV PIP_NO_CACHE_DIR= \
+    PIP_NO_COMPILE=1 \
+    PIP_CACHE_DIR=/root/.cache/pip
+COPY --chown=0:0 requirements.txt /tmp/
+# pip constraint does not support optional dependencies.
+RUN --mount=type=cache,sharing=locked,id=pipcache,target=/root/.cache/pip,mode=775 \
+    sed 's/\[.*\]//' /tmp/requirements.txt >/tmp/constraints.txt && \
+    if [ "${PKG_CACHE}" == "off" ]; then \
+        echo "pip cache off"; \
+        export PIP_NO_CACHE_DIR=off; \
+    else \
+        echo "pip cache on"; \
+        export PIP_NO_CACHE_DIR=; \
+        export PIP_CACHE_DIR=/root/.cache/pip; \
+        pip cache remove llama_cpp_python; \
+        pip cache remove flash_attn; \
+    fi && \
+    ${VIRTUAL_ENV}/bin/pip install wheel && \
+    ${VIRTUAL_ENV}/bin/pip install -c /tmp/constraints.txt \
+        --index-url https://download.pytorch.org/whl/rocm${PYTORCH_ROCM_VERSION} \
+        torch && \
+    /tmp/remove-gfx.sh && \
+    CMAKE_ARGS="-DAMDGPU_ARCH=${AMDGPU_ARCH} -DLLAMA_HIPBLAS=on -DCMAKE_C_COMPILER=clang-${CLANG_VER} -DCMAKE_CXX_COMPILER=clang++-${CLANG_VER}" \
+        CFLAGS="-mno-avx" \
+        FORCE_CMAKE=1 \
+        ${VIRTUAL_ENV}/bin/pip install --no-binary llama_cpp_python -c /tmp/constraints.txt llama_cpp_python && \
+    ${VIRTUAL_ENV}/bin/pip install -r /tmp/requirements.txt && \
+    find ${VIRTUAL_ENV} -name __pycache__ | xargs rm -rf
+
+# install instructlab last
+COPY . /tmp/instructlab/
+RUN ${VIRTUAL_ENV}/bin/pip install --no-deps /tmp/instructlab && \
+    find ${VIRTUAL_ENV} -name __pycache__ | xargs rm -rf
+
+
+# create final image from base runtime, copy virtual env into final stage
+FROM runtime AS final
+COPY --from=builder ${VIRTUAL_ENV}/lib/${PYTHON}/site-packages ${VIRTUAL_ENV}/lib/${PYTHON}/site-packages
+COPY --from=builder ${VIRTUAL_ENV}/bin ${VIRTUAL_ENV}/bin
+WORKDIR "${VIRTUAL_ENV}"
+LABEL com.github.containers.toolbox="true" \
+      com.github.instructlab.instructlab.target="rocm-${AMDGPU_ARCH}" \
+      name="instructlab-rocm-base-gfx${GFX_VERSION}" \
+      usage="This image is meant to be used with the toolbox(1) command" \
+      summary="PyTorch, llama.cpp, and InstructLab dependencies for AMD ROCm GPU ${AMDGPU_ARCH}" \
+      maintainer="Christian Heimes <cheimes@redhat.com>"

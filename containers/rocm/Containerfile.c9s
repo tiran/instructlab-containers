@@ -1,0 +1,126 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# c9s Python 3.11 container from Red Hat's Software Collections
+# registry.access.redhat.com/ubi9/python-311 needs subscription
+# Arguments:
+# - BASEIMAGE
+# - AMDGPU_TARGETS
+# - FLASH_ATTN_AMDGPU_TARGETS
+# - PYTHON=python3.11
+ARG BASEIMAGE=quay.io/sclorg/python-311-c9s
+
+FROM ${BASEIMAGE} AS runtime
+ARG PKG_CACHE=on
+# default: same targets and ROCm version as upstream PyTorch
+ARG AMDGPU_TARGETS=gfx900;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx1030;gfx1100
+# PyTorch 2.2.1 does not support torch_compile with 3.12
+ARG PYTHON=python3.11
+ENV AMDGPU_TARGETS="${AMDGPU_TARGETS}" \
+    PYTORCH_ROCM_VERSION="6.0" \
+    PYTHON="${PYTHON}" \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_COMPILE=1 \
+    PS1="(app-root) \w\$ " \
+    PKG_CACHE=${PKG_CACHE} \
+    VIRTUAL_ENV="/opt/app-root" \
+    PATH="/opt/rocm/bin:$PATH"
+
+COPY --chown=1001:0 containers/sitecustomize.py ${VIRTUAL_ENV}/lib/${PYTHON}/site-packages/
+COPY --chown=1001:0 containers/bin/debug-* ${VIRTUAL_ENV}/bin/
+
+# build as root, so pip caching and dnf works
+USER 0
+
+# hipblaslt ... rocrand are needed for de-vendoring
+# force remove 'rocm-llvm' from runtime, saves 3.6 GB on disk
+# remove gfx files for unused ISAs, saves about 1.7 GB on disk
+# sed creates regular expression '.*\(gfx900\|gfx906\|...\).*'
+COPY --chown=0:0 containers/rocm/rocm60.repo /etc/yum.repos.d/
+RUN --mount=type=cache,sharing=locked,id=dnf-scl,target=/var/cache/dnf \
+    if [ -f /etc/yum.repos.d/centos.repo ]; then dnf config-manager --enable crb; fi && \
+    dnf install -y --nodocs --setopt=install_weak_deps=False --setopt=keepcache=True \
+        ${PYTHON}-devel lld-libs make git \
+        rocm-smi hipblas hiprand hipsparse \
+        hipblaslt hipblaslt-devel hipfft hipsolver miopen-hip roctracer rccl rocrand && \
+    if [ "${PKG_CACHE}" == "off" ]; then dnf clean all; fi && \
+    rpm -e --nodeps rocm-llvm && \
+    find /opt/rocm/lib/ -type f \
+        -and -name '*gfx*' \
+        -and -not -regex '.*\('$(echo $AMDGPU_TARGETS | sed -e 's/;/\\|/g' -e 's/:xnack[-+]//g')'\).*' \
+        -print0 | xargs -0 rm -v
+
+RUN echo "/opt/rocm/lib" > /etc/ld.so.conf.d/rocm.conf && ldconfig
+
+# build env contains compilers and build dependencies
+FROM runtime AS builder
+RUN --mount=type=cache,sharing=locked,id=dnf-c9s,target=/var/cache/dnf \
+    dnf install -y --nodocs --setopt=keepcache=True \
+        rocm-llvm \
+        lld cmake ninja-build gcc \
+        rocblas-devel hip-devel hipblas-devel rocprim-devel rocthrust-devel hipsparse-devel hipcub-devel hiprand-devel \
+        rocm-device-libs hsa-rocr-devel && \
+    if [ "${PKG_CACHE}" == "off" ]; then dnf clean all; fi
+
+# remove cached wheel to force rebuild
+# Force AVX off, https://github.com/ggerganov/llama.cpp/issues/5316
+COPY requirements.txt containers/rocm/de-vendor-torch.sh /tmp/
+RUN --mount=type=cache,sharing=locked,id=pipcache,target=/root/.cache/pip,mode=775 \
+    sed 's/\[.*\]//' /tmp/requirements.txt >/tmp/constraints.txt && \
+    if [ "${PKG_CACHE}" == "off" ]; then \
+        echo "pip cache off"; \
+        export PIP_NO_CACHE_DIR=off; \
+    else \
+        echo "pip cache on"; \
+        export PIP_NO_CACHE_DIR=; \
+        export PIP_CACHE_DIR=/root/.cache/pip; \
+        pip cache remove llama_cpp_python; \
+        pip cache remove flash_attn; \
+    fi && \
+    ${VIRTUAL_ENV}/bin/pip install wheel && \
+    ${VIRTUAL_ENV}/bin/pip install -c /tmp/constraints.txt \
+        --index-url https://download.pytorch.org/whl/rocm${PYTORCH_ROCM_VERSION} \
+        torch && \
+    /tmp/de-vendor-torch.sh && \
+    CMAKE_ARGS="-DAMDGPU_TARGETS=${AMDGPU_TARGETS} -DLLAMA_HIPBLAS=on -DCMAKE_C_COMPILER=/opt/rocm/llvm/bin/clang -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++" \
+        CFLAGS="-mno-avx" \
+        FORCE_CMAKE=1 \
+        ${VIRTUAL_ENV}/bin/pip install --no-binary llama_cpp_python -c /tmp/constraints.txt llama_cpp_python && \
+    ${VIRTUAL_ENV}/bin/pip install -r /tmp/requirements.txt && \
+    find ${VIRTUAL_ENV} -name __pycache__ | xargs rm -rf && \
+    chown -R 1001:0 ${VIRTUAL_ENV}
+
+# MI200: gfx90a, MI300: gfx942 (gfx940 and gfx941 are not supported by PyTorch)
+ARG FLASH_ATTN_AMDGPU_TARGETS=""
+ENV FLASH_ATTN_AMDGPU_TARGETS="${FLASH_ATTN_AMDGPU_TARGETS}"
+RUN \
+    if test -n "${FLASH_ATTN_AMDGPU_TARGETS}"; then \
+        git clone --recurse-submodules https://github.com/ROCm/flash-attention.git /tmp/flash_attn && \
+        git -C /tmp/flash_attn checkout --recurse-submodules 2554f490101742ccdc56620a938f847f61754be6 && \
+        GPU_ARCHS="${FLASH_ATTN_AMDGPU_TARGETS}" \
+            MAX_JOBS="$(( $(nproc) < 8 ? 4 : 8 ))" \
+            ${VIRTUAL_ENV}/bin/pip install -v --no-cache-dir -c /tmp/constraints.txt /tmp/flash_attn && \
+        find ${VIRTUAL_ENV} -name __pycache__ | xargs rm -rf && \
+        chown -R 1001:0 ${VIRTUAL_ENV}; \
+    fi
+
+# install instructlab last
+COPY . /tmp/instructlab/
+RUN ${VIRTUAL_ENV}/bin/pip install --no-deps /tmp/instructlab && \
+    find ${VIRTUAL_ENV} -name __pycache__ | xargs rm -rf && \
+    chown -R 1001:0 ${VIRTUAL_ENV}
+
+# create final image from base runtime, copy virtual env into final stage
+FROM runtime AS final
+COPY --from=builder ${VIRTUAL_ENV}/lib/${PYTHON}/site-packages ${VIRTUAL_ENV}/lib/${PYTHON}/site-packages
+COPY --from=builder ${VIRTUAL_ENV}/bin ${VIRTUAL_ENV}/bin
+# contains ilab config.yaml, .cache/huggingface, and training data
+VOLUME ["/opt/app-root/src"]
+CMD ["/bin/bash"]
+LABEL com.github.instructlab.instructlab.target="rocm" \
+      com.github.instructlab.instructlab.amdgpu-targets="${AMDGPU_TARGETS}" \
+      name="instructlab-c9s-rocm" \
+      usage="podman run -v./data:/opt/app-root/src:z --device /dev/dri --device /dev/kfd ..." \
+      summary="PyTorch, llama.cpp, and InstructLab dependencies for AMD ROCm GPUs on c9s (${AMDGPU_TARGETS})" \
+      maintainer="Christian Heimes <cheimes@redhat.com>"
+
+# sudo setsebool container_use_devices 1
