@@ -1,3 +1,6 @@
 [submodule "instructlab"]
 	path = instructlab
 	url = https://github.com/instructlab/instructlab.git
+[submodule "instructlab-hpu"]
+	path = instructlab-hpu
+	url = git@github.com:tiran/instructlab.git
