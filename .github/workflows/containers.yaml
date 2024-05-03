@@ -11,6 +11,8 @@ on:
 
 permissions:
     contents: read
+    packages: write
+    attestations: write
 
 env:
     REGISTRY: ghcr.io
@@ -28,35 +30,35 @@ jobs:
                       suffix: rocm-fc40-gfx1100
                       free_diskspace: true
                       build_args: |
-                        AMDGPU_ARCH=gfx1100
-                        HSA_OVERRIDE_GFX_VERSION=11.0.0
-                        PKG_CACHE=off
+                          AMDGPU_ARCH=gfx1100
+                          HSA_OVERRIDE_GFX_VERSION=11.0.0
+                          PKG_CACHE=off
 
                     - containerfile: containers/rocm/Containerfile.fedora
                       suffix: rocm-gfx1030
                       free_diskspace: true
                       build_args: |
-                        AMDGPU_ARCH=gfx1030
-                        HSA_OVERRIDE_GFX_VERSION=10.3.0
+                          AMDGPU_ARCH=gfx1030
+                          HSA_OVERRIDE_GFX_VERSION=10.3.0
 
                     - containerfile: containers/cuda/Containerfile
                       suffix: cuda-ubi9
                       free_diskspace: true
                       build_args: |
-                        PKG_CACHE=off
+                          PKG_CACHE=off
 
                     - containerfile: containers/rocm/Containerfile.c9s
                       suffix: rocm-c9s
                       free_diskspace: true
                       build_args: |
-                        PKG_CACHE=off
-                        # FLASH_ATTN_AMDGPU_TARGETS=gfx90a,gfx942
+                          PKG_CACHE=off
+                          # FLASH_ATTN_AMDGPU_TARGETS=gfx90a,gfx942
 
                     - containerfile: containers/cpu/Containerfile
                       suffix: cpu
                       free_diskspace: false
                       build_args: |
-                        PKG_CACHE=off
+                          PKG_CACHE=off
         steps:
             - name: Checkout
               uses: actions/checkout@v4
@@ -66,17 +68,17 @@ jobs:
 
             - name: Install jq
               run: |
-                set -e
-                sudo apt update
-                sudo apt install -u jq
+                  set -e
+                  sudo apt update
+                  sudo apt install -u jq
 
             - name: Reconfigure Docker data-root
               run: |
-                set -e
-                sudo mkdir /mnt/docker
-                jq '. + {"data-root": "/mnt/docker"}' < /etc/docker/daemon.json | tee /tmp/daemon.json
-                sudo mv /tmp/daemon.json /etc/docker/daemon.json
-                sudo systemctl restart docker.service
+                  set -e
+                  sudo mkdir /mnt/docker
+                  jq '. + {"data-root": "/mnt/docker"}' < /etc/docker/daemon.json | tee /tmp/daemon.json
+                  sudo mv /tmp/daemon.json /etc/docker/daemon.json
+                  sudo systemctl restart docker.service
 
             - name: Docker info
               run: docker info
@@ -112,14 +114,14 @@ jobs:
 
             - name: Disable cache mount to safe disk space
               run: |
-                sed -i 's/^RUN --mount=type=cache.*$/RUN \\/' ${{ matrix.containerfile }}
+                  sed -i 's/^RUN --mount=type=cache.*$/RUN \\/' ${{ matrix.containerfile }}
 
             - name: Login to Quay.io
               uses: docker/login-action@v3
               with:
-                registry: ${{ env.REGISTRY }}
-                username: ${{ github.actor }}
-                password: ${{ secrets.GITHUB_TOKEN }}
+                  registry: ${{ env.REGISTRY }}
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
 
             - name: Set up Docker Buildx
               uses: docker/setup-buildx-action@v3
@@ -149,7 +151,7 @@ jobs:
             - name: List images ${{ steps.meta.outputs.tags }}
               run: |
                   docker images
-    
+
             - name: Test image ${{ steps.meta.outputs.tags }}
               run: |
                   set -e
@@ -168,12 +170,12 @@ jobs:
             - name: Push image all tags ${{ env.IMAGE_NAME }}
               if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch' }}
               run: |
-                docker push --all-tags ${{ env.IMAGE_NAME }}
+                  docker push --all-tags ${{ env.IMAGE_NAME }}
 
             - name: Generate artifact attestation
               if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch' }}
               uses: actions/attest-build-provenance@v1
               with:
-                subject-name: ${{ env.IMAGE_NAME}}
-                subject-digest: ${{ steps.build.outputs.digest }}
-                push-to-registry: true
+                  subject-name: ${{ env.IMAGE_NAME}}
+                  subject-digest: ${{ steps.build.outputs.digest }}
+                  push-to-registry: true
