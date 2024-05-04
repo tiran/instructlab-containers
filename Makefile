@@ -25,7 +25,7 @@ update:
 	git submodule update --init
 	git -C instructlab fetch --all
 	git -C instructlab checkout main
-	git -C instructlab reset --hard origin/main
+	git -C instructlab reset --hard origin/cuda_bf16
 	git -C instructlab-hpu fetch --all
 	git -C instructlab-hpu checkout hpu-prepare
 	git -C instructlab-hpu reset --hard origin/hpu-prepare
