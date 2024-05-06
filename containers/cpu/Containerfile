@@ -27,7 +27,6 @@ ENV PKG_CACHE=${PKG_CACHE}
 USER 0
 
 # --no-binary llama_cpp_python to force rebuild
-# Force AVX off, https://github.com/ggerganov/llama.cpp/issues/5316
 COPY requirements.txt /tmp/
 RUN --mount=type=cache,sharing=locked,id=pipcache,target=/root/.cache/pip,mode=775 \
     sed 's/\[.*\]//' /tmp/requirements.txt >/tmp/constraints.txt && \
@@ -44,8 +43,7 @@ RUN --mount=type=cache,sharing=locked,id=pipcache,target=/root/.cache/pip,mode=7
     ${VIRTUAL_ENV}/bin/pip install -c /tmp/constraints.txt \
         --index-url https://download.pytorch.org/whl/cpu \
         torch && \
-    CMAKE_ARGS="" \
-        CFLAGS="-mno-avx" \
+    CMAKE_ARGS="-DLLAMA_NATIVE=off" \
         FORCE_CMAKE=1 \
         ${VIRTUAL_ENV}/bin/pip install --no-binary llama_cpp_python -c /tmp/constraints.txt llama_cpp_python && \
     ${VIRTUAL_ENV}/bin/pip install -r /tmp/requirements.txt && \
