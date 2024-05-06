@@ -20,14 +20,13 @@ RUN ${PYTHON} -m venv --upgrade-deps --system-site-packages ${VIRTUAL_ENV} && \
 COPY containers/sitecustomize.py ${VIRTUAL_ENV}/lib/${PYTHON}/site-packages/
 COPY containers/bin/debug-* ${VIRTUAL_ENV}/bin/
 
-# -mno-avx: work around a build problem with llama-cpp-python and gcc.
+# -DLLAMA_NATIVE=off: work around a build problem with llama-cpp-python and gcc 11.
 # flash-attn is compiled from source, bitsandbytes has a manylinux wheel
 COPY requirements.txt requirements-hpu.txt /tmp
 RUN sed 's/\[.*\]//' /tmp/requirements.txt >/tmp/constraints.txt && \
     export PIP_NO_CACHE_DIR=off; \
     ${VIRTUAL_ENV}/bin/pip install wheel && \
-    CMAKE_ARGS="" \
-        CFLAGS="-mno-avx" \
+    CMAKE_ARGS="-DLLAMA_NATIVE=off" \
         FORCE_CMAKE=1 \
         ${VIRTUAL_ENV}/bin/pip install --no-binary llama_cpp_python -c /tmp/constraints.txt llama_cpp_python && \
     ${VIRTUAL_ENV}/bin/pip install -r /tmp/requirements.txt -r /tmp/requirements-hpu.txt && \
