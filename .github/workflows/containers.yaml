@@ -61,7 +61,7 @@ jobs:
 
                     - containerfile: containers/hpu/Containerfile
                       suffix: hpu-rhel-hl1.15.1
-                      context: instructlab-hpu/
+                      context: instructlab/
                       free_diskspace: true
                       build_args: |
                           PKG_CACHE=off

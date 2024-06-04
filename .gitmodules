@@ -1,6 +1,4 @@
 [submodule "instructlab"]
 	path = instructlab
-	url = git@github.com:tiran/instructlab.git
-[submodule "instructlab-hpu"]
-	path = instructlab-hpu
-	url = git@github.com:tiran/instructlab.git
+	url = https://github.com/instructlab/instructlab.git
+	branch = main
